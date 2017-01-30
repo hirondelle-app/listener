@@ -1,11 +1,11 @@
 package main
 
 import (
+	"encoding/json"
 	"fmt"
 	"log"
 	"net/url"
-
-	"encoding/json"
+	"strings"
 
 	"github.com/ChimeraCoder/anaconda"
 	"github.com/jessevdk/go-flags"
@@ -24,9 +24,10 @@ var config struct {
 }
 
 type tweet struct {
-	ID       string `json:"twitter_id"`
+	TweetID  string `json:"twitter_id"`
 	Likes    int    `json:"likes"`
 	Retweets int    `json:"retweets"`
+	Keyword  string `json:"keyword"`
 }
 
 func main() {
@@ -41,23 +42,81 @@ func main() {
 	api := anaconda.NewTwitterApi(config.Twitter.AccessToken, config.Twitter.AccessTokenSecret)
 
 	v := url.Values{}
-	v.Set("track", "python,golang,javascript")
+	v.Set("track", customKeywords(config.Keywords))
+	v.Set("languages", "en")
 	s := api.PublicStreamFilter(v)
+
+	tweetIDList := make([]string, 0)
 
 	for {
 		item := <-s.C
 		switch status := item.(type) {
 		case anaconda.Tweet:
 			if retweet := status.RetweetedStatus; retweet != nil {
-				if retweet.RetweetCount >= 20 && retweet.FavoriteCount >= 20 {
-					tweet := &tweet{}
-					tweet.ID = retweet.IdStr
-					tweet.Likes = retweet.FavoriteCount
-					tweet.Retweets = retweet.RetweetCount
-					tweetJson, _ := json.Marshal(tweet)
-					fmt.Println(string(tweetJson))
+				if retweet.RetweetCount >= config.Retweets && retweet.FavoriteCount >= config.Likes {
+					if tweetInDB := stringInSlice(retweet.IdStr, tweetIDList); tweetInDB == false {
+
+						tweet := &tweet{
+							TweetID:  retweet.IdStr,
+							Likes:    retweet.FavoriteCount,
+							Retweets: retweet.RetweetCount,
+							Keyword:  getHashtag(config.Keywords, retweet),
+						}
+						tweetJson, _ := json.Marshal(tweet)
+						fmt.Println(string(tweetJson))
+						tweetIDList = append(tweetIDList, retweet.IdStr)
+					}
 				}
 			}
 		}
 	}
+}
+
+func getHashtag(keywordsStr string, tweet *anaconda.Tweet) string {
+
+	var keyword string
+
+	// Get hashtag
+	for _, k := range strings.Split(keywordsStr, ",") {
+		for _, h := range tweet.Entities.Hashtags {
+			hashtagLower := strings.ToLower(h.Text)
+			if k == hashtagLower {
+				keyword = hashtagLower
+				break
+			}
+		}
+	}
+
+	// We still don't have a keyword, so we take user @mention
+	for _, k := range strings.Split(keywordsStr, ",") {
+		for _, u := range tweet.Entities.User_mentions {
+			userLower := strings.ToLower(u.Screen_name)
+			if k == userLower {
+				keyword = userLower
+				break
+			}
+		}
+	}
+
+	return keyword
+}
+
+func customKeywords(keywordsStr string) string {
+	var customKeywords string
+
+	for _, keyword := range strings.Split(keywordsStr, ",") {
+		//customKeywords += fmt.Sprintf("@%[1]s,#%[1]s,", keyword)
+		customKeywords += fmt.Sprintf("@%[1]s,", keyword)
+	}
+
+	return customKeywords
+}
+
+func stringInSlice(a string, list []string) bool {
+	for _, b := range list {
+		if b == a {
+			return true
+		}
+	}
+	return false
 }
