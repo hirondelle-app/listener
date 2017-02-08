@@ -1,20 +1,26 @@
 package main
 
 import (
+	"bytes"
 	"encoding/json"
 	"fmt"
 	"log"
+	"net/http"
 	"net/url"
 	"strings"
 
+	"encoding/gob"
+
 	"github.com/ChimeraCoder/anaconda"
+	"github.com/bitly/go-nsq"
 	"github.com/jessevdk/go-flags"
 )
 
+var keywords []keyword
+
 var config struct {
-	Likes    int    `short:"l" long:"likes" description:"Minimun likes for a tweet" required:"true"`
-	Retweets int    `short:"r" long:"retweets" description:"Minimun retweets for a tweet" required:"true"`
-	Keywords string `short:"k" long:"keywords" description:"Keywords for the streaming api" required:"true"`
+	Likes    int `short:"l" long:"likes" description:"Minimun likes for a tweet" required:"true"`
+	Retweets int `short:"r" long:"retweets" description:"Minimun retweets for a tweet" required:"true"`
 	Twitter  struct {
 		AccessToken       string `long:"access-token" description:"Access token for Twitter Api" required:"true"`
 		AccessTokenSecret string `long:"access-token-secret" description:"Secret access token for Twitter Api" required:"true"`
@@ -24,10 +30,10 @@ var config struct {
 }
 
 type tweet struct {
-	TweetID  string `json:"twitter_id"`
-	Likes    int    `json:"likes"`
-	Retweets int    `json:"retweets"`
-	Keyword  string `json:"keyword"`
+	TweetID   string `json:"twitter_id"`
+	Likes     int    `json:"likes"`
+	Retweets  int    `json:"retweets"`
+	KeywordID int64  `json:"keywordID"`
 }
 
 func main() {
@@ -41,12 +47,20 @@ func main() {
 	anaconda.SetConsumerSecret(config.Twitter.ConsumerSecret)
 	api := anaconda.NewTwitterApi(config.Twitter.AccessToken, config.Twitter.AccessTokenSecret)
 
+	keywords = getKeywords()
+
 	v := url.Values{}
-	v.Set("track", customKeywords(config.Keywords))
+	v.Set("track", keywordsToStr())
 	v.Set("languages", "en")
 	s := api.PublicStreamFilter(v)
 
 	tweetIDList := make([]string, 0)
+
+	configNSQ := nsq.NewConfig()
+	producer, err := nsq.NewProducer("127.0.0.1:4150", configNSQ)
+	if err != nil {
+		log.Fatal(err)
+	}
 
 	for {
 		item := <-s.C
@@ -55,15 +69,24 @@ func main() {
 			if retweet := status.RetweetedStatus; retweet != nil {
 				if retweet.RetweetCount >= config.Retweets && retweet.FavoriteCount >= config.Likes {
 					if tweetInDB := stringInSlice(retweet.IdStr, tweetIDList); tweetInDB == false {
+						fmt.Println(tweetInDB)
+						fmt.Println(tweetIDList)
 
 						tweet := &tweet{
-							TweetID:  retweet.IdStr,
-							Likes:    retweet.FavoriteCount,
-							Retweets: retweet.RetweetCount,
-							Keyword:  getHashtag(config.Keywords, retweet),
+							TweetID:   retweet.IdStr,
+							Likes:     retweet.FavoriteCount,
+							Retweets:  retweet.RetweetCount,
+							KeywordID: getKeywordIDFromTweet(retweet),
 						}
-						tweetJson, _ := json.Marshal(tweet)
-						fmt.Println(string(tweetJson))
+
+						buf := new(bytes.Buffer)
+						enc := gob.NewEncoder(buf)
+						enc.Encode(tweet)
+
+						err := producer.PublishAsync("tweets", buf.Bytes(), nil)
+						if err != nil {
+							log.Panic("Could not connect")
+						}
 						tweetIDList = append(tweetIDList, retweet.IdStr)
 					}
 				}
@@ -72,44 +95,64 @@ func main() {
 	}
 }
 
-func getHashtag(keywordsStr string, tweet *anaconda.Tweet) string {
+func getKeywordIDFromTweet(tweet *anaconda.Tweet) int64 {
 
-	var keyword string
+	var keywordID int64
 
 	// Get hashtag
-	for _, k := range strings.Split(keywordsStr, ",") {
+	for _, k := range keywords {
 		for _, h := range tweet.Entities.Hashtags {
 			hashtagLower := strings.ToLower(h.Text)
-			if k == hashtagLower {
-				keyword = hashtagLower
+			if k.Label == hashtagLower {
+				keywordID = k.ID
 				break
 			}
 		}
 	}
 
 	// We still don't have a keyword, so we take user @mention
-	for _, k := range strings.Split(keywordsStr, ",") {
+	for _, k := range keywords {
 		for _, u := range tweet.Entities.User_mentions {
 			userLower := strings.ToLower(u.Screen_name)
-			if k == userLower {
-				keyword = userLower
+			if k.Label == userLower {
+				keywordID = k.ID
 				break
 			}
 		}
 	}
 
-	return keyword
+	return keywordID
 }
 
-func customKeywords(keywordsStr string) string {
+type keyword struct {
+	ID    int64
+	Label string `json:"label"`
+}
+
+func getKeywords() []keyword {
+	var keywords []keyword
+
+	resp, err := http.Get("https://api.bardina.net/keywords")
+	if err != nil {
+		log.Fatal(err)
+	}
+
+	defer resp.Body.Close()
+
+	json.NewDecoder(resp.Body).Decode(&keywords)
+
+	return keywords
+}
+
+func keywordsToStr() string {
 	var customKeywords string
 
-	for _, keyword := range strings.Split(keywordsStr, ",") {
-		//customKeywords += fmt.Sprintf("@%[1]s,#%[1]s,", keyword)
-		customKeywords += fmt.Sprintf("@%[1]s,", keyword)
+	for _, k := range keywords {
+		customKeywords += fmt.Sprintf("@%[1]s,#%[1]s,", k.Label)
 	}
 
 	return customKeywords
+
 }
 
 func stringInSlice(a string, list []string) bool {
