@@ -69,21 +69,25 @@ func main() {
 			if retweet := status.RetweetedStatus; retweet != nil {
 				if retweet.RetweetCount >= config.Retweets && retweet.FavoriteCount >= config.Likes {
 					if tweetInDB := stringInSlice(retweet.IdStr, tweetIDList); tweetInDB == false {
-						fmt.Println(tweetInDB)
-						fmt.Println(tweetIDList)
+
+						keywordID := getKeywordIDFromTweet(retweet)
+
+						if keywordID == 0 {
+							break
+						}
 
 						tweet := &tweet{
 							TweetID:   retweet.IdStr,
 							Likes:     retweet.FavoriteCount,
 							Retweets:  retweet.RetweetCount,
-							KeywordID: getKeywordIDFromTweet(retweet),
+							KeywordID: keywordID,
 						}
 
 						buf := new(bytes.Buffer)
 						enc := gob.NewEncoder(buf)
 						enc.Encode(tweet)
 
-						err := producer.PublishAsync("tweets", buf.Bytes(), nil)
+						err = producer.PublishAsync("tweets", buf.Bytes(), nil)
 						if err != nil {
 							log.Panic("Could not connect")
 						}
@@ -105,7 +109,7 @@ func getKeywordIDFromTweet(tweet *anaconda.Tweet) int64 {
 			hashtagLower := strings.ToLower(h.Text)
 			if k.Label == hashtagLower {
 				keywordID = k.ID
-				break
+				return keywordID
 			}
 		}
 	}
@@ -116,7 +120,7 @@ func getKeywordIDFromTweet(tweet *anaconda.Tweet) int64 {
 			userLower := strings.ToLower(u.Screen_name)
 			if k.Label == userLower {
 				keywordID = k.ID
-				break
+				return keywordID
 			}
 		}
 	}
