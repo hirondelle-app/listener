@@ -57,7 +57,7 @@ func main() {
 	tweetIDList := make([]string, 0)
 
 	configNSQ := nsq.NewConfig()
-	producer, err := nsq.NewProducer("127.0.0.1:4150", configNSQ)
+	producer, err := nsq.NewProducer("10.0.0.10:4150", configNSQ)
 	if err != nil {
 		log.Fatal(err)
 	}
