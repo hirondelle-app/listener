@@ -21,7 +21,8 @@ var keywords []keyword
 var config struct {
 	Likes        int    `short:"l" long:"likes" description:"Minimun likes for a tweet" required:"true"`
 	Retweets     int    `short:"r" long:"retweets" description:"Minimun retweets for a tweet" required:"true"`
-	QueueAddress string `short:"a" long:"queue-address" description:"Queue address" required:"true"`
+	QueueAddress string `short:"q" long:"queue-address" description:"Queue address" required:"true"`
+	ApiAddress   string `short:"a" long:"api-address" description:"Api address" required:"true"`
 	Twitter      struct {
 		AccessToken       string `long:"access-token" description:"Access token for Twitter Api" required:"true"`
 		AccessTokenSecret string `long:"access-token-secret" description:"Secret access token for Twitter Api" required:"true"`
@@ -137,7 +138,7 @@ type keyword struct {
 func getKeywords() []keyword {
 	var keywords []keyword
 
-	resp, err := http.Get("https://api.bardina.net/keywords")
+	resp, err := http.Get(fmt.Sprintf("%s/keywords", config.ApiAddress))
 	if err != nil {
 		log.Fatal(err)
 	}
