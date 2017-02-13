@@ -19,9 +19,10 @@ import (
 var keywords []keyword
 
 var config struct {
-	Likes    int `short:"l" long:"likes" description:"Minimun likes for a tweet" required:"true"`
-	Retweets int `short:"r" long:"retweets" description:"Minimun retweets for a tweet" required:"true"`
-	Twitter  struct {
+	Likes        int    `short:"l" long:"likes" description:"Minimun likes for a tweet" required:"true"`
+	Retweets     int    `short:"r" long:"retweets" description:"Minimun retweets for a tweet" required:"true"`
+	QueueAddress string `short:"a" long:"queue-address" description:"Queue address" required:"true"`
+	Twitter      struct {
 		AccessToken       string `long:"access-token" description:"Access token for Twitter Api" required:"true"`
 		AccessTokenSecret string `long:"access-token-secret" description:"Secret access token for Twitter Api" required:"true"`
 		ConsumerKey       string `long:"consumer-key" description:"Consumer key for Twitter Api" required:"true"`
@@ -57,7 +58,7 @@ func main() {
 	tweetIDList := make([]string, 0)
 
 	configNSQ := nsq.NewConfig()
-	producer, err := nsq.NewProducer("10.0.0.10:4150", configNSQ)
+	producer, err := nsq.NewProducer(config.QueueAddress, configNSQ)
 	if err != nil {
 		log.Fatal(err)
 	}
